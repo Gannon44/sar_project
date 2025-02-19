@@ -1,0 +1,12 @@
+name: sar
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python
+  - python-dotenv
+  - pytest
+  - pip
+  - pip:
+      - pyautogen
+      - autogen
