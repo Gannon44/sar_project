@@ -18,7 +18,10 @@ class HealthAgent(SARBaseAgent):
             5. Estimating survival time under current conditions.
             6. Planning appropriate medical resources for rescue operations.
             7. Assessing health risks that may arise during SAR operations.
-            8. Generating medical advice for SAR teams in the field."""
+            8. Generating medical advice for SAR teams in the field.
+            9. Providing information on drug, food, and disease interactions.
+            10. Updating and retrieving the current mission status.
+            """
         )
         # Optionally maintain state for assembled profiles or statuses
         self.health_profiles = {}
@@ -37,6 +40,12 @@ class HealthAgent(SARBaseAgent):
         - "plan_resources": with "profile" and "current_status"
         - "assess_health_risk": with "profile" and "environment_data"
         - "generate_medical_advice": with "profile", "environment_data", and optionally "survival_estimation"
+        - "get_drug_interactions": with "drug_name"
+        - "get_food_interactions": with "drug_name"
+        - "get_disease_interactions": with "drug_name"
+        - "get_all_interactions": with "drug_name"
+        - "update_status": with "status"
+        - "get_status": with no additional data
         """
         try:
             if "assemble_profile" in message:
