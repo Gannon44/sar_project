@@ -6,6 +6,11 @@ dependencies:
   - python
   - python-dotenv
   - pytest
+  - beautifulsoup4
+  - requests
+  - regex
+  - openai
+  - json
   - pip
   - pip:
       - pyautogen
