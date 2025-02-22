@@ -1,6 +1,11 @@
-from sar_project.agents.base_agent import SARBaseAgent
-import requests
+from src.sar_project.agents.base_agent import SARBaseAgent
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
+import urllib.parse
 import re
 import json
 import openai
@@ -24,6 +29,14 @@ class HealthAgent(SARBaseAgent):
             """
         )
         # Optionally maintain state for assembled profiles or statuses
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--window-size=1920,1080")
+        chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                    "Chrome/91.0.4472.124 Safari/537.36")
+        self.driver = webdriver.Chrome(options=chrome_options)
         self.health_profiles = {}
         self.status_reports = {}
         
@@ -238,7 +251,7 @@ class HealthAgent(SARBaseAgent):
         if survival_hours < 24:
             advice += " Immediate evacuation is strongly recommended."
         return {"medical_advice": advice}
-    
+
     def get_interactions_slug(self, drug_name):
         """
         Searches drugs.com for the given drug name (or alias) and extracts the interactions slug.
@@ -260,13 +273,20 @@ class HealthAgent(SARBaseAgent):
         """
         base_search_url = "https://www.drugs.com/search.php"
         params = {"searchterm": drug_name}
-        headers = {"User-Agent": "Mozilla/5.0 (compatible; SAR-Agent/1.0)"}
+        url = f"{base_search_url}?{urllib.parse.urlencode(params)}"
         
-        response = requests.get(base_search_url, params=params, headers=headers)
-        if response.status_code != 200:
-            raise Exception(f"Failed to retrieve search results for '{drug_name}'. Status code: {response.status_code}")
+        self.driver.get(url)
         
-        soup = BeautifulSoup(response.text, "html.parser")
+        try:
+            # Wait until an anchor tag with href containing '/drug-interactions/' is present.
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='/drug-interactions/']"))
+            )
+        except Exception:
+            raise Exception(f"Failed to retrieve search results for '{drug_name}'.")
+        
+        html = self.driver.page_source
+        soup = BeautifulSoup(html, "html.parser")
         interaction_link = soup.find("a", href=lambda x: x and "/drug-interactions/" in x)
         if not interaction_link:
             raise Exception(f"No drug interactions link found for '{drug_name}'.")
@@ -274,11 +294,10 @@ class HealthAgent(SARBaseAgent):
         href = interaction_link.get("href")
         match = re.search(r"/drug-interactions/([^/]+)\.html", href)
         if match:
-            slug = match.group(1)
-            return slug
+            return match.group(1)
         else:
             raise Exception(f"Could not parse interaction slug from link: {href}")
-
+    
     def _get_interaction_drugs(self, slug, filter_value):
         """
         Helper function that scrapes the interactions page for a given filter value.
@@ -291,12 +310,18 @@ class HealthAgent(SARBaseAgent):
             set: A set of drug names found in the interactions list.
         """
         url = f"https://www.drugs.com/drug-interactions/{slug}-index.html?filter={filter_value}"
-        headers = {"User-Agent": "Mozilla/5.0 (compatible; SAR-Agent/1.0)"}
-        response = requests.get(url, headers=headers)
-        if response.status_code != 200:
-            raise Exception(f"Failed to retrieve interactions page for slug '{slug}' with filter {filter_value}. Status code: {response.status_code}")
+        self.driver.get(url)
         
-        soup = BeautifulSoup(response.text, "html.parser")
+        try:
+            # Wait until the interactions list loads.
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "ul.interactions.ddc-list-column-2"))
+            )
+        except Exception:
+            raise Exception(f"Failed to retrieve interactions page for slug '{slug}' with filter {filter_value}.")
+        
+        html = self.driver.page_source
+        soup = BeautifulSoup(html, "html.parser")
         drug_names = set()
         for ul in soup.find_all("ul", class_="interactions ddc-list-column-2"):
             for li in ul.find_all("li"):
@@ -304,7 +329,7 @@ class HealthAgent(SARBaseAgent):
                 if a_tag and a_tag.text:
                     drug_names.add(a_tag.text.strip())
         return drug_names
-
+    
     def get_drug_interactions(self, slug):
         """
         Scrapes the drug interactions page for the given slug for both major and moderate interactions.
@@ -320,7 +345,7 @@ class HealthAgent(SARBaseAgent):
         major_interactions = self._get_interaction_drugs(slug, 3)
         moderate_interactions = self._get_interaction_drugs(slug, 2)
         return {"major": list(major_interactions), "moderate": list(moderate_interactions)}
-
+    
     def get_food_interactions_text(self, slug):
         """
         Scrapes the food interactions page from drugs.com for the given interactions slug.
@@ -340,19 +365,25 @@ class HealthAgent(SARBaseAgent):
             Exception: If the page cannot be retrieved or the required content is not found.
         """
         url = f"https://www.drugs.com/food-interactions/{slug}.html?professional=1"
-        headers = {"User-Agent": "Mozilla/5.0 (compatible; SAR-Agent/1.0)"}
-        response = requests.get(url, headers=headers)
-        if response.status_code != 200:
-            raise Exception(f"Failed to retrieve food interactions page for slug '{slug}'. Status code: {response.status_code}")
+        self.driver.get(url)
         
-        soup = BeautifulSoup(response.text, "html.parser")
+        try:
+            # Wait until the food interactions reference div loads.
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div.interactions-reference"))
+            )
+        except Exception:
+            raise Exception(f"Failed to retrieve food interactions page for slug '{slug}'.")
+        
+        html = self.driver.page_source
+        soup = BeautifulSoup(html, "html.parser")
         interactions_div = soup.find("div", class_="interactions-reference")
         if not interactions_div:
             raise Exception("Could not locate the food interactions reference section on the page.")
         
         full_text = interactions_div.get_text(separator="\n", strip=True)
         return full_text
-
+    
     def get_disease_interactions_text(self, slug):
         """
         Scrapes the disease interactions page from drugs.com for the given interactions slug.
@@ -372,18 +403,29 @@ class HealthAgent(SARBaseAgent):
             Exception: If the page cannot be retrieved or the required content is not found.
         """
         url = f"https://www.drugs.com/disease-interactions/{slug}.html?professional=1"
-        headers = {"User-Agent": "Mozilla/5.0 (compatible; SAR-Agent/1.0)"}
-        response = requests.get(url, headers=headers)
-        if response.status_code != 200:
-            raise Exception(f"Failed to retrieve disease interactions page for slug '{slug}'. Status code: {response.status_code}")
+        self.driver.get(url)
         
-        soup = BeautifulSoup(response.text, "html.parser")
+        try:
+            # Wait until the disease interactions reference div loads.
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div.interactions-reference"))
+            )
+        except Exception:
+            raise Exception(f"Failed to retrieve disease interactions page for slug '{slug}'.")
+        
+        html = self.driver.page_source
+        soup = BeautifulSoup(html, "html.parser")
         interactions_div = soup.find("div", class_="interactions-reference")
         if not interactions_div:
             raise Exception("Could not locate the disease interactions reference section on the page.")
         
         full_text = interactions_div.get_text(separator="\n", strip=True)
         return full_text
+    
+    def close(self):
+        """Clean up the Selenium webdriver."""
+        self.driver.quit()
+
 
     def get_all_interactions(self, drug_name):
         """
@@ -421,7 +463,7 @@ class HealthAgent(SARBaseAgent):
             return {"error": "Profile not found."}
 
         
-    def prompt_with_profile_facts(self, profile_id):
+    def prompt_with_profile_facts(self, profile_id, other_info="None"):
         """
         Prompts an OpenAI LLM with all known facts about a specific health profile.
 
@@ -444,6 +486,7 @@ class HealthAgent(SARBaseAgent):
         prompt = (
             f"You are a health specialist for SAR operations.\n"
             f"Known facts about the health profile:\n{known_facts}\n"
+            f"Other information supplied:\n{other_info}\n"
             "Please provide an analysis or suggest next steps."
         )
 
