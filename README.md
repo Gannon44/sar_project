@@ -1,18 +1,17 @@
 # Search and Rescue (SAR) Agent Framework - CSC 581
 
 ## Contributions of this Fork
-Added a HealthAgent class that does the following:
-            1. Assembling a general health profile of the missing person using available records.
-            2. Extrapolating current health status based on the assembled profile.
-            3. Analyzing medication data to assess potential drug interactions and effects.
-            4. Evaluating environmental impacts on the subject’s health.
-            5. Estimating survival time under current conditions.
-            6. Planning appropriate medical resources for rescue operations.
-            7. Assessing health risks that may arise during SAR operations.
-            8. Generating medical advice for SAR teams in the field.
-            9. Providing information on drug, food, and disease interactions by scraping drugs.com.
-            10. Updating and retrieving the current mission status.
-
+Added a HealthAgent class that does the following: <br><br>
+            1. Assembling a general health profile of the missing person using available records. <br>
+            2. Extrapolating current health status based on the assembled profile. <br>
+            3. Analyzing medication data to assess potential drug interactions and effects. <br>
+            4. Evaluating environmental impacts on the subject’s health. <br>
+            5. Estimating survival time under current conditions. <br>
+            6. Planning appropriate medical resources for rescue operations. <br>
+            7. Assessing health risks that may arise during SAR operations. <br>
+            8. Generating medical advice for SAR teams in the field. <br>
+            9. Providing information on drug, food, and disease interactions by scraping drugs.com. <br>
+            10. Updating and retrieving the current mission status. <br><br>
 Finally, the agent is capable of feeding all of the assembled information into an LLM from OpenAI.
 
 ## Prerequisites
