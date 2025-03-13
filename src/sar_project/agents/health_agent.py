@@ -1,4 +1,5 @@
 from src.sar_project.agents.base_agent import SARBaseAgent
+from src.sar_project.config.settings import *
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -8,7 +9,9 @@ from bs4 import BeautifulSoup
 import urllib.parse
 import re
 import json
-import openai
+from openai import OpenAI
+
+client = OpenAI()
 
 class HealthAgent(SARBaseAgent):
     def __init__(self, name="health_specialist"):
@@ -24,11 +27,11 @@ class HealthAgent(SARBaseAgent):
             6. Planning appropriate medical resources for rescue operations.
             7. Assessing health risks that may arise during SAR operations.
             8. Generating medical advice for SAR teams in the field.
-            9. Providing information on drug, food, and disease interactions.
+            9. Providing information on drug, food, and disease interactions by scraping drugs.com.
             10. Updating and retrieving the current mission status.
+            11. Aggregating patient data for a unified view of needs and action points.
             """
         )
-        # Optionally maintain state for assembled profiles or statuses
         chrome_options = Options()
         chrome_options.add_argument("--headless")
         chrome_options.add_argument("--disable-gpu")
@@ -37,10 +40,9 @@ class HealthAgent(SARBaseAgent):
                                     "AppleWebKit/537.36 (KHTML, like Gecko) "
                                     "Chrome/91.0.4472.124 Safari/537.36")
         self.driver = webdriver.Chrome(options=chrome_options)
-        self.health_profiles = {}
-        self.status_reports = {}
-        
-        
+        self.health_profiles = {}   # Stores patient profiles keyed by patient id.
+        self.status_reports = {}    # Stores computed status reports per patient.
+
     def process_request(self, message):
         """
         Process incoming health-related requests. Expected message keys include:
@@ -59,6 +61,8 @@ class HealthAgent(SARBaseAgent):
         - "get_all_interactions": with "drug_name"
         - "update_status": with "status"
         - "get_status": with no additional data
+        - "extend_profile": with "profile_id" and "new_data"
+        - "get_unified_summary": to aggregate patient data into a unified overview.
         """
         try:
             if "assemble_profile" in message:
@@ -94,10 +98,15 @@ class HealthAgent(SARBaseAgent):
                 return self.update_status(message["status"])
             elif "get_status" in message:
                 return {"status": self.get_status()}
+            elif "extend_profile" in message:
+                return self.extend_profile(message["profile_id"], message["new_data"])
+            elif "get_unified_summary" in message:
+                return self.get_unified_patient_summary()
             else:
                 return {"error": "Unknown request type"}
         except Exception as e:
             return {"error": str(e)}
+
 
     def assemble_health_profile(self, patient_data):
         """
@@ -122,7 +131,6 @@ class HealthAgent(SARBaseAgent):
             "current_conditions": patient_data.get("current_conditions", []),
             "medications": patient_data.get("medications", []),
         }
-        # Save profile in the agent's state (if needed)
         self.health_profiles[profile["id"]] = profile
         return {"profile": profile, "message": "Health profile assembled successfully."}
 
@@ -217,12 +225,12 @@ class HealthAgent(SARBaseAgent):
             resources.append("advanced life support equipment")
         else:
             resources.append("basic first aid kit")
-        
+
         # Additional resources for elderly patients
         age = profile.get("age", 30)
         if isinstance(age, (int, float)) and age > 60:
             resources.append("geriatric care supplies")
-        
+
         return {"recommended_resources": resources}
 
     def assess_health_risk(self, profile, environment_data):
@@ -274,9 +282,9 @@ class HealthAgent(SARBaseAgent):
         base_search_url = "https://www.drugs.com/search.php"
         params = {"searchterm": drug_name}
         url = f"{base_search_url}?{urllib.parse.urlencode(params)}"
-        
+
         self.driver.get(url)
-        
+
         try:
             # Wait until an anchor tag with href containing '/drug-interactions/' is present.
             WebDriverWait(self.driver, 10).until(
@@ -284,20 +292,20 @@ class HealthAgent(SARBaseAgent):
             )
         except Exception:
             raise Exception(f"Failed to retrieve search results for '{drug_name}'.")
-        
+
         html = self.driver.page_source
         soup = BeautifulSoup(html, "html.parser")
         interaction_link = soup.find("a", href=lambda x: x and "/drug-interactions/" in x)
         if not interaction_link:
             raise Exception(f"No drug interactions link found for '{drug_name}'.")
-        
+
         href = interaction_link.get("href")
         match = re.search(r"/drug-interactions/([^/]+)\.html", href)
         if match:
             return match.group(1)
         else:
             raise Exception(f"Could not parse interaction slug from link: {href}")
-    
+
     def _get_interaction_drugs(self, slug, filter_value):
         """
         Helper function that scrapes the interactions page for a given filter value.
@@ -311,7 +319,7 @@ class HealthAgent(SARBaseAgent):
         """
         url = f"https://www.drugs.com/drug-interactions/{slug}-index.html?filter={filter_value}"
         self.driver.get(url)
-        
+
         try:
             # Wait until the interactions list loads.
             WebDriverWait(self.driver, 10).until(
@@ -319,7 +327,7 @@ class HealthAgent(SARBaseAgent):
             )
         except Exception:
             raise Exception(f"Failed to retrieve interactions page for slug '{slug}' with filter {filter_value}.")
-        
+
         html = self.driver.page_source
         soup = BeautifulSoup(html, "html.parser")
         drug_names = set()
@@ -329,7 +337,7 @@ class HealthAgent(SARBaseAgent):
                 if a_tag and a_tag.text:
                     drug_names.add(a_tag.text.strip())
         return drug_names
-    
+
     def get_drug_interactions(self, slug):
         """
         Scrapes the drug interactions page for the given slug for both major and moderate interactions.
@@ -345,7 +353,7 @@ class HealthAgent(SARBaseAgent):
         major_interactions = self._get_interaction_drugs(slug, 3)
         moderate_interactions = self._get_interaction_drugs(slug, 2)
         return {"major": list(major_interactions), "moderate": list(moderate_interactions)}
-    
+
     def get_food_interactions_text(self, slug):
         """
         Scrapes the food interactions page from drugs.com for the given interactions slug.
@@ -366,7 +374,7 @@ class HealthAgent(SARBaseAgent):
         """
         url = f"https://www.drugs.com/food-interactions/{slug}.html?professional=1"
         self.driver.get(url)
-        
+
         try:
             # Wait until the food interactions reference div loads.
             WebDriverWait(self.driver, 10).until(
@@ -374,16 +382,16 @@ class HealthAgent(SARBaseAgent):
             )
         except Exception:
             raise Exception(f"Failed to retrieve food interactions page for slug '{slug}'.")
-        
+
         html = self.driver.page_source
         soup = BeautifulSoup(html, "html.parser")
         interactions_div = soup.find("div", class_="interactions-reference")
         if not interactions_div:
             raise Exception("Could not locate the food interactions reference section on the page.")
-        
+
         full_text = interactions_div.get_text(separator="\n", strip=True)
         return full_text
-    
+
     def get_disease_interactions_text(self, slug):
         """
         Scrapes the disease interactions page from drugs.com for the given interactions slug.
@@ -404,7 +412,7 @@ class HealthAgent(SARBaseAgent):
         """
         url = f"https://www.drugs.com/disease-interactions/{slug}.html?professional=1"
         self.driver.get(url)
-        
+
         try:
             # Wait until the disease interactions reference div loads.
             WebDriverWait(self.driver, 10).until(
@@ -412,19 +420,16 @@ class HealthAgent(SARBaseAgent):
             )
         except Exception:
             raise Exception(f"Failed to retrieve disease interactions page for slug '{slug}'.")
-        
+
         html = self.driver.page_source
         soup = BeautifulSoup(html, "html.parser")
         interactions_div = soup.find("div", class_="interactions-reference")
         if not interactions_div:
             raise Exception("Could not locate the disease interactions reference section on the page.")
-        
+
         full_text = interactions_div.get_text(separator="\n", strip=True)
         return full_text
-    
-    def close(self):
-        """Clean up the Selenium webdriver."""
-        self.driver.quit()
+
 
 
     def get_all_interactions(self, drug_name):
@@ -442,7 +447,7 @@ class HealthAgent(SARBaseAgent):
         drug_interactions = self.get_drug_interactions(slug)
         food_interactions = self.get_food_interactions_text(slug)
         disease_interactions = self.get_disease_interactions_text(slug)
-        
+
         return {
             "drug_name": drug_name,
             "slug": slug,
@@ -450,19 +455,42 @@ class HealthAgent(SARBaseAgent):
             "food_interactions": food_interactions,
             "disease_interactions": disease_interactions
         }
-        
+
+
     def extend_profile(self, profile_id, new_data):
         """
         Extend an existing health profile with new data.
-        """       
+        """
         if profile_id in self.health_profiles:
             profile = self.health_profiles[profile_id]
             profile.update(new_data)
+            # Optionally, re-run extrapolation after update.
+            self.status_reports[profile_id] = self.extrapolate_current_status(profile)
             return {"status": "updated", "new_profile": profile}
         else:
             return {"error": "Profile not found."}
 
-        
+
+    def get_unified_patient_summary(self):
+        """
+        Aggregates data from all stored patient profiles, summarizing critical action points.
+        For each patient, it includes:
+          - Patient ID
+          - Extrapolated current status and health score
+          - Recommended medical resources
+        Returns a unified output for quick decision making.
+        """
+        summary = {}
+        for patient_id, profile in self.health_profiles.items():
+            status = self.extrapolate_current_status(profile)
+            resources = self.plan_medical_resources(profile, status)
+            summary[patient_id] = {
+                "profile": profile,
+                "status": status,
+                "recommended_resources": resources.get("recommended_resources", [])
+            }
+        return summary
+
     def prompt_with_profile_facts(self, profile_id, other_info="None"):
         """
         Prompts an OpenAI LLM with all known facts about a specific health profile.
@@ -474,34 +502,24 @@ class HealthAgent(SARBaseAgent):
             dict: Result from the LLM with the generated response or an error message.
         """
 
-        # Retrieve the health profile
         profile = self.health_profiles.get(profile_id)
         if not profile:
             return {"error": "Profile not found."}
-
-        # Serialize profile to JSON for structured input
         known_facts = json.dumps(profile, indent=2)
-
-        # Construct message content
         prompt = (
             f"You are a health specialist for SAR operations.\n"
             f"Known facts about the health profile:\n{known_facts}\n"
             f"Other information supplied:\n{other_info}\n"
             "Please provide an analysis or suggest next steps."
         )
-
-        # Interact with the OpenAI model
         try:
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
+            response = client.chat.completions.create(model=DEFAULT_MODEL,
                 messages=[
                     {"role": "system", "content": self.system_message},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=2500
-            )
-            # Extract the text response
-            generated_response = response['choices'][0]['message']['content'].strip()
+                max_tokens=2500)
+            generated_response = response.model_dump()["choices"][0]["message"]["content"]
             return {"response": generated_response}
         except Exception as e:
             return {"error": str(e)}
@@ -514,3 +532,7 @@ class HealthAgent(SARBaseAgent):
     def get_status(self):
         """Return the current mission status."""
         return self.mission_status
+
+    def close(self):
+        """Clean up the Selenium webdriver."""
+        self.driver.quit()

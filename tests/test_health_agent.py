@@ -6,7 +6,9 @@ from sar_project.agents.health_agent import HealthAgent
 class TestHealthAgent:
     @pytest.fixture
     def health_agent(self):
-        return HealthAgent()
+        agent = HealthAgent()
+        yield agent
+        agent.close()
 
 
     ## Tests for assemble_health_profile
@@ -366,3 +368,49 @@ class TestHealthAgent:
         health_agent.update_status("phase_1")
         health_agent.update_status("phase_2")
         assert health_agent.get_status() == "phase_2"
+
+    ### tests for dynamic profile updates and unified summary
+    
+    def test_extend_profile_success(self, health_agent):
+        # Assemble a new profile.
+        initial_data = {
+            "id": "patient001",
+            "age": 50,
+            "medical_history": ["hypertension"],
+            "allergies": [],
+            "current_conditions": ["asthma"],
+            "medications": [{"name": "DrugA", "dosage": "50mg", "frequency": "daily"}]
+        }
+        health_agent.assemble_health_profile(initial_data)
+        # Update the profile with new conditions.
+        new_data = {"current_conditions": ["asthma", "diabetes"]}
+        result = health_agent.extend_profile("patient001", new_data)
+        assert result.get("status") == "updated"
+        updated_profile = result.get("new_profile")
+        assert "diabetes" in updated_profile.get("current_conditions", [])
+        # Check that the status report was updated.
+        status = health_agent.status_reports.get("patient001")
+        assert status is not None
+
+    def test_extend_profile_not_found(self, health_agent):
+        result = health_agent.extend_profile("nonexistent", {"age": 60})
+        assert "error" in result
+        assert result["error"] == "Profile not found."
+
+    def test_get_unified_patient_summary(self, health_agent):
+        # Create multiple profiles.
+        profiles = [
+            {"id": "patient001", "age": 50, "current_conditions": ["asthma"]},
+            {"id": "patient002", "age": 70, "current_conditions": ["severe_injury"]},
+            {"id": "patient003", "age": 40, "current_conditions": []}
+        ]
+        for p in profiles:
+            health_agent.assemble_health_profile(p)
+        summary = health_agent.get_unified_patient_summary()
+        # Summary should include all patients.
+        for p in profiles:
+            pid = p["id"]
+            assert pid in summary
+            # Check that status and resources are included.
+            assert "status" in summary[pid]
+            assert "recommended_resources" in summary[pid]

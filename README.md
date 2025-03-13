@@ -87,3 +87,15 @@ sar-project/
 ├── requirements.txt         # Project dependencies
 └── .env                     # Environment configuration
 ```
+
+
+## Insights
+
+After reviewing tester feedback, I learned that while the agent effectively compiles and analyzes patient data, real-world SAR operations require dynamic, real-time updates to patient profiles. The feedback highlighted that patient conditions can change rapidly, and responders need a consolidated, at-a-glance summary of each patient's status and required interventions. This highlighted the importance of not only gathering detailed patient data but also provided an aggregated overview for decision makers.
+
+## Modifications
+
+In response to the insights:
+- I enhanced the `extend_profile` method to allow dynamic updates to existing patient profiles.
+- I introduced a new method `get_unified_patient_summary` that aggregates data from all stored profiles. This unified summary provides critical details such as the extrapolated health status, health score, and recommended resources for each patient.
+- The unified output is designed to offer SAR teams a quick overview of each patient's needs and action points. This improves situational awareness in dynamic rescue scenarios.
